@@ -8,9 +8,13 @@ from sklearn.tree import export_graphviz
 import graphviz
 import statsmodels.api as sm
 
-# Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons
-data = scrape_premier_league_fixtures(2017, 2023)
+# Set the option to None to display all columns
+pd.set_option('display.max_columns', None)
 
+# Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons
+data = scrape_premier_league_fixtures(2017, 2019)
+
+print(data.columns)
 
 print(data.tail())
 split_point = int(len(data) * 1)
@@ -40,13 +44,16 @@ rolling_means_home_conceded = data.groupby('Home')['Away Goals'].rolling(window=
 rolling_means_away_conceded = data.groupby('Away')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
 rolling_means_away_scored = data.groupby('Away')['Away Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
 
+rolling_means_home_xg = data.groupby('Home')['xG'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+rolling_means_away_xg = data.groupby('Home')['xG.1'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
 
 data['Home_Scored_Rolling_Mean'] = rolling_means_home_scored
 data['Home_Conceded_Rolling_Mean'] = rolling_means_home_conceded
 data['Away_Scored_Rolling_Mean'] = rolling_means_away_scored
 data['Away_Conceded_Rolling_Mean'] = rolling_means_away_conceded
 
-
+data['Home_Xg_Rolling_Mean'] = rolling_means_home_xg
+data['Away_Xg_Rolling_Mean'] = rolling_means_away_xg
 
 # Goal difference
 data['Home_Goal_Difference_Rolling_Mean'] = data['Home_Scored_Rolling_Mean'] - data['Home_Conceded_Rolling_Mean']
@@ -128,7 +135,7 @@ all_cols = [
         'Home_Scored_Rolling_Mean', 'Home_Conceded_Rolling_Mean', 
         'Away_Scored_Rolling_Mean', 'Away_Conceded_Rolling_Mean',
         'Home_Goal_Difference_Rolling_Mean', 'Away_Goal_Difference_Rolling_Mean', 
-        'FTTG'
+        'FTTG', 'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
     ]
 ]
 
@@ -137,19 +144,24 @@ print(f'these are all the cols {all_cols}')
 
 feature_cols = [
     col for col in all_cols 
-    if col.startswith('Away_') 
-    or col.startswith('Home_')
-    or col.endswith('target_mean') 
-    or col in [
+    if 
+    #col.startswith('Away_') 
+    #or col.startswith('Home_')
+    # or col.endswith('target_mean') 
+    col in [
         'Year'
         ,'Month_sin'
         ,'Month_cos'
-        ,'Home_Scored_Rolling_Mean' 
-        ,'Home_Conceded_Rolling_Mean' 
-        ,'Away_Scored_Rolling_Mean'
-        ,'Away_Conceded_Rolling_Mean'
-        ,'Home_Goal_Difference_Rolling_Mean'
-        ,'Away_Goal_Difference_Rolling_Mean'
+        #,'Home_Scored_Rolling_Mean' 
+        #,'Home_Conceded_Rolling_Mean' 
+        #,'Away_Scored_Rolling_Mean'
+        #,'Away_Conceded_Rolling_Mean'
+        #,'Home_Goal_Difference_Rolling_Mean'
+        #,'Away_Goal_Difference_Rolling_Mean'
+        ,'Home_Xg_Rolling_Mean'
+        ,'Away_Xg_Rolling_Mean'
+        
+        
     ]
 ]
 
