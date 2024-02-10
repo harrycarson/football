@@ -198,6 +198,9 @@ for X, y, dataset_name in [(X_validation, y_validation, 'Validation'), (X_test, 
     mse = mean_squared_error(y, predictions)
     print(f'Mean Squared Error on {dataset_name} Set: {mse}')
 
+
+
+
 # Calculate the mean of the target variable in the training set
 mean_fthg_train = y_train.mean()
 
