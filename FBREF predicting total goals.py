@@ -13,7 +13,7 @@ import statsmodels.api as sm
 pd.set_option('display.max_columns', None)
 
 # Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons
-data = scrape_premier_league_fixtures(2017, 2023)
+data = scrape_premier_league_fixtures(2017, 2021)
 data = data.dropna()
 print(f'These are the columns in the dataset: {data.columns}')
 
@@ -141,12 +141,12 @@ feature_cols = [
         'Year'
         ,'Month_sin'
         ,'Month_cos'
-        ,'Home_Scored_Rolling_Mean' 
-        ,'Home_Conceded_Rolling_Mean' 
-        ,'Away_Scored_Rolling_Mean'
-        ,'Away_Conceded_Rolling_Mean'
-        ,'Home_Goal_Difference_Rolling_Mean'
-        ,'Away_Goal_Difference_Rolling_Mean'
+        #,'Home_Scored_Rolling_Mean' 
+        #,'Home_Conceded_Rolling_Mean' 
+        #,'Away_Scored_Rolling_Mean'
+        #,'Away_Conceded_Rolling_Mean'
+        #,'Home_Goal_Difference_Rolling_Mean'
+        #,'Away_Goal_Difference_Rolling_Mean'
         ,'Home_Xg_Rolling_Mean'
         ,'Away_Xg_Rolling_Mean'
         
@@ -288,3 +288,7 @@ for X, y, dataset_name in [(X_validation_glm, y_validation, 'Validation'), (X_te
     predictions_glm = glm_results.predict(X)
     mse_glm = mean_squared_error(y, predictions_glm)
     print(f'Mean Squared Error for GLM on {dataset_name} Set: {mse_glm}')
+
+# Calculate the mean of the target variable in the training set
+mean_Home_Goals_test = y_test.mean()
+print(f'Mean of Home Goals in Training Set: {mean_Home_Goals_test}')
