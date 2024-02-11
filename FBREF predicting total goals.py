@@ -8,13 +8,14 @@ from sklearn.tree import export_graphviz
 import graphviz
 import statsmodels.api as sm
 
+
 # Set the option to None to display all columns
 pd.set_option('display.max_columns', None)
 
 # Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons
-data = scrape_premier_league_fixtures(2017, 2019)
-
-print(data.columns)
+data = scrape_premier_league_fixtures(2017, 2023)
+data = data.dropna()
+print(f'These are the columns in the dataset: {data.columns}')
 
 print(data.tail())
 split_point = int(len(data) * 1)
@@ -33,10 +34,6 @@ data['Year'] = data['Date'].dt.year
 data['is_weekend'] = (data['Date'].dt.dayofweek >= 5).astype(int)
 data['Month_sin'] = np.sin(data['Date'].dt.month * 2 * np.pi / 12)
 data['Month_cos'] = np.cos(data['Date'].dt.month * 2 * np.pi / 12)
-
-# After adding the new features
-print("Shape after adding new features:", data.shape)
-print(data.tail())
 
 # Calculate rolling means
 rolling_means_home_scored = data.groupby('Home')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
@@ -60,12 +57,7 @@ data['Home_Goal_Difference_Rolling_Mean'] = data['Home_Scored_Rolling_Mean'] - d
 data['Away_Goal_Difference_Rolling_Mean'] = data['Away_Scored_Rolling_Mean'] - data['Away_Conceded_Rolling_Mean']
 
 # After calculating rolling means
-print("Shape after calculating rolling means:", data.shape)
 print(data.head())
-
-# After dropping NaN values
-print("Shape after dropping NaN values:", data.shape)
-print(data.tail())
 
 # Create dummy variables
 dummy_away = pd.get_dummies(data['Away'], prefix='Away_')
@@ -74,7 +66,7 @@ dummy_home = pd.get_dummies(data['Home'], prefix='Home_')
 # Concatenate the dummy variables with the original DataFrame
 datax = pd.concat([data, dummy_away, dummy_home], axis=1)
 
-print(data)
+print(f'Dataframe after adding dummy variables: {data}')
 
 # Split the data
 train_size = int(len(data) * 0.6)
@@ -139,9 +131,6 @@ all_cols = [
     ]
 ]
 
-print(f'these are all the cols {all_cols}')
-
-
 feature_cols = [
     col for col in all_cols 
     if 
@@ -152,12 +141,12 @@ feature_cols = [
         'Year'
         ,'Month_sin'
         ,'Month_cos'
-        #,'Home_Scored_Rolling_Mean' 
-        #,'Home_Conceded_Rolling_Mean' 
-        #,'Away_Scored_Rolling_Mean'
-        #,'Away_Conceded_Rolling_Mean'
-        #,'Home_Goal_Difference_Rolling_Mean'
-        #,'Away_Goal_Difference_Rolling_Mean'
+        ,'Home_Scored_Rolling_Mean' 
+        ,'Home_Conceded_Rolling_Mean' 
+        ,'Away_Scored_Rolling_Mean'
+        ,'Away_Conceded_Rolling_Mean'
+        ,'Home_Goal_Difference_Rolling_Mean'
+        ,'Away_Goal_Difference_Rolling_Mean'
         ,'Home_Xg_Rolling_Mean'
         ,'Away_Xg_Rolling_Mean'
         
@@ -165,29 +154,16 @@ feature_cols = [
     ]
 ]
 
-print(feature_cols)
-print(train)
-
 train1 = train[all_cols].dropna()
 validation1 = validation[all_cols].dropna()
 test1 = test[all_cols].dropna()
 
 X_train = train1[feature_cols]
-y_train = train1['FTTG']
+y_train = train1['Home Goals']
 X_validation = validation1[feature_cols]
-y_validation = validation1['FTTG']
+y_validation = validation1['Home Goals']
 X_test = test1[feature_cols]
-y_test = test1['FTTG']
-
-
-# After dropping NaN values
-print("Shape after dropping NaN values:", data.shape)
-print(data.tail())
-
-
-# Before fitting the model
-print("Shape of X_train:", X_train.shape)
-print("X_train head:", X_train.head())
+y_test = test1['Home Goals']
 
 
 # Train the model
