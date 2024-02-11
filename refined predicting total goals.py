@@ -7,6 +7,9 @@ from sklearn.tree import export_graphviz
 import graphviz
 import statsmodels.api as sm
 
+# Set the option to None to display all columns
+pd.set_option('display.max_columns', None)
+
 # More data!
 data_23_24 = pd.read_csv("C:/Users/harry/Documents/Actual Documents/Football-Data/EPL 23-24 Dataset Football-Data.csv")
 data_22_23 = pd.read_csv("C:/Users/harry/Documents/Actual Documents/Football-Data/EPL 22-23 Dataset Football-Data.csv")
@@ -102,7 +105,10 @@ import pandas as pd
 from scipy.stats import poisson
 from scipy.optimize import minimize_scalar
 
-def find_lambda(prob_over_2_5_goals):
+def find_lambda(odds_over_2_5_goals):
+
+    prob_over_2_5_goals = 1/odds_over_2_5_goals
+
     # Adjust the bounds if necessary, based on your data distribution
     bounds = (0, 10)  
     
@@ -276,6 +282,11 @@ mean_fthg_train = y_train.mean()
 # Create constant predictions for the validation and test sets
 constant_predictions_validation = np.full_like(y_validation, mean_fthg_train)
 constant_predictions_test = np.full_like(y_test, mean_fthg_train)
+
+#bet365 = mean_squared_error(y_test, data['Mean_Goals'])
+#print(bet365)
+#print(f'Mean Squared Error bet365 over 2.5 on Validation Set: {bet365}')
+
 
 # Calculate MSE for constant predictions
 mse_constant_validation = mean_squared_error(y_validation, constant_predictions_validation)
