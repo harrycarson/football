@@ -7,6 +7,8 @@ from sklearn.metrics import mean_squared_error
 from sklearn.tree import export_graphviz
 import graphviz
 import statsmodels.api as sm
+from sklearn.feature_selection import RFE
+
 
 def scrape_and_clean_data(start_year, end_year):
     """Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons"""
@@ -78,10 +80,8 @@ def prepare_feature_columns(data, train, validation, test):
     """
     Prepares the feature columns based on specified criteria and splits the data into features (X) and target (y) sets.
     """
-    # Combine all unique columns from both dataframes
     combined_columns = set(data.columns) | set(train.columns)
 
-    # Filter columns based on specified criteria
     all_cols = [
         col for col in combined_columns
         if col.startswith('Away') or col.startswith('Home') or col.endswith('target_mean') or col in [
@@ -96,16 +96,18 @@ def prepare_feature_columns(data, train, validation, test):
     feature_cols = [
         col for col in all_cols 
         if col in [
-            'Year', 'Month_sin', 'Month_cos', 'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
+            'Year', 'Month_sin', 'Month_cos', 
+            'Home_Scored_Rolling_Mean', 'Home_Conceded_Rolling_Mean', 
+            'Away_Scored_Rolling_Mean', 'Away_Conceded_Rolling_Mean',
+            'Home_Goal_Difference_Rolling_Mean', 'Away_Goal_Difference_Rolling_Mean', 
+            'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
         ]
     ]
 
-    # Prepare the data by filtering with all_cols and dropping NA values
     train_prepared = train[all_cols].dropna()
     validation_prepared = validation[all_cols].dropna()
     test_prepared = test[all_cols].dropna()
 
-    # Split into features (X) and target (y)
     X_train = train_prepared[feature_cols]
     y_train = train_prepared['Home Goals']
     X_validation = validation_prepared[feature_cols]
@@ -127,8 +129,24 @@ def evaluate_model(model, X, y, dataset_name):
     """
     predictions = model.predict(X)
     mse = mean_squared_error(y, predictions)
-    print(f'Mean Squared Error on {dataset_name} Set: {mse}')
+    print(f'Mean Squared Error on {dataset_name} Set: {mse:.2f}')
     return mse
+
+def fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test):
+    X_train_glm = sm.add_constant(X_train, prepend=False, has_constant='add')
+    X_validation_glm = sm.add_constant(X_validation, prepend=False, has_constant='add')
+    X_test_glm = sm.add_constant(X_test, prepend=False, has_constant='add')
+    
+    glm_family = sm.families.Poisson()
+    glm_model = sm.GLM(y_train, X_train_glm, family=glm_family)
+    glm_results = glm_model.fit()
+    
+    for X, y, dataset_name in [(X_validation_glm, y_validation, 'Validation'), (X_test_glm, y_test, 'Test')]:
+        predictions_glm = glm_results.predict(X)
+        mse_glm = mean_squared_error(y, predictions_glm)
+        print(f'Mean Squared Error for GLM on {dataset_name} Set: {mse_glm:.2f}')
+    
+    #print(glm_results.summary())
 
 def evaluate_baseline(y_train, y_validation, y_test):
     """
@@ -138,8 +156,8 @@ def evaluate_baseline(y_train, y_validation, y_test):
     mse_constant_validation = mean_squared_error(y_validation, np.full_like(y_validation, mean_Home_Goals_train))
     mse_constant_test = mean_squared_error(y_test, np.full_like(y_test, mean_Home_Goals_train))
     
-    print(f'Mean Squared Error with Constant Predictions on Validation Set: {mse_constant_validation}')
-    print(f'Mean Squared Error with Constant Predictions on Test Set: {mse_constant_test}')
+    print(f'Mean Squared Error with Constant Predictions on Validation Set: {mse_constant_validation:.2f}')
+    print(f'Mean Squared Error with Constant Predictions on Test Set: {mse_constant_test:.2f}')
 
 def visualize_feature_importances(model, X_train):
     feature_importances = model.feature_importances_
@@ -161,38 +179,29 @@ def visualize_actual_vs_predicted(y_test, predictions_test):
     plt.title('Actual vs Predicted Goals on Test Set')
     plt.show()
 
-    # Displaying the last 5 predictions for review
-    print("Actual Last 5 Goals:", y_test[-5:])
-    print("Predicted Last 5 Goals:", predictions_test[-5:])
-
-def combine_predictions_with_actual(test, y_test, predictions_test):
+def combine_predictions_with_actual(test, X_test, y_test, predictions_test):
+    """
+    Combines the test set with actual values, predictions, and the features used for predictions.
+    """
     predicted_goals_df = pd.DataFrame(predictions_test, columns=['Predicted_Home Goals'])
     y_test_reset = y_test.reset_index(drop=True)
-    results_df = pd.concat([test[['Date', 'Home', 'Away']].reset_index(drop=True), y_test_reset, predicted_goals_df], axis=1)
+    X_test_reset = X_test.reset_index(drop=True)
+    results_df = pd.concat([test[['Date', 'Home', 'Away']].reset_index(drop=True), X_test_reset, y_test_reset, predicted_goals_df], axis=1)
     results_df.rename(columns={'Home Goals': 'Actual_Home Goals'}, inplace=True)
-    print(results_df.tail(10))  # Adjust the number of rows displayed as needed
+    print(results_df.tail(50))  # Adjust the number of rows displayed as needed
 
-def fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test):
-    X_train_glm = sm.add_constant(X_train, prepend=False, has_constant='add')
-    X_validation_glm = sm.add_constant(X_validation, prepend=False, has_constant='add')
-    X_test_glm = sm.add_constant(X_test, prepend=False, has_constant='add')
-    
-    glm_family = sm.families.Poisson()
-    glm_model = sm.GLM(y_train, X_train_glm, family=glm_family)
-    glm_results = glm_model.fit()
-    print(glm_results.summary())
-    
-    for X, y, dataset_name in [(X_validation_glm, y_validation, 'Validation'), (X_test_glm, y_test, 'Test')]:
-        predictions_glm = glm_results.predict(X)
-        mse_glm = mean_squared_error(y, predictions_glm)
-        print(f'Mean Squared Error for GLM on {dataset_name} Set: {mse_glm}')
+
+
 
 
 # Set pandas display option
 pd.set_option('display.max_columns', None)
+#pd.set_option('expand_frame_repr', False)
+
+
 
 # Data processing
-data = scrape_and_clean_data(2017, 2021)
+data = scrape_and_clean_data(2017, 2023)
 data = add_total_goals_feature(data)
 data = convert_date_and_add_features(data)
 data = calculate_rolling_means(data)
@@ -211,6 +220,7 @@ predictions_validation = model.predict(X_validation)
 predictions_test = model.predict(X_test)
 evaluate_model(model, X_validation, y_validation, 'Validation')
 evaluate_model(model, X_test, y_test, 'Test')
+fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test)
 
 # Baseline evaluation
 evaluate_baseline(y_train, y_validation, y_test)
@@ -218,5 +228,12 @@ evaluate_baseline(y_train, y_validation, y_test)
 # Visualization and additional model evaluation
 visualize_feature_importances(model, X_train)
 visualize_actual_vs_predicted(y_test, predictions_test)
-combine_predictions_with_actual(test, y_test, predictions_test)
-fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test)
+#combine_predictions_with_actual(data, test, y_test, predictions_test)
+
+X_train, y_train, X_validation, y_validation, X_test, y_test = prepare_feature_columns(data, train, validation, test)
+combine_predictions_with_actual(test, X_test, y_test, predictions_test)
+
+
+
+
+
