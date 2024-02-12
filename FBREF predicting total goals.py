@@ -8,287 +8,215 @@ from sklearn.tree import export_graphviz
 import graphviz
 import statsmodels.api as sm
 
+def scrape_and_clean_data(start_year, end_year):
+    """Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons"""
+    data = scrape_premier_league_fixtures(start_year, end_year)
+    data = data.dropna()
+    return data
 
-# Set the option to None to display all columns
-pd.set_option('display.max_columns', None)
+def add_total_goals_feature(data):
+    data['FTTG'] = data['Home Goals'] + data['Away Goals']
+    return data
 
-# Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons
-data = scrape_premier_league_fixtures(2017, 2021)
-data = data.dropna()
-print(f'These are the columns in the dataset: {data.columns}')
+def convert_date_and_add_features(data):
+    data['Date'] = pd.to_datetime(data['Date'])
+    data['Year'] = data['Date'].dt.year
+    data['is_weekend'] = (data['Date'].dt.dayofweek >= 5).astype(int)
+    data['Month_sin'] = np.sin(data['Date'].dt.month * 2 * np.pi / 12)
+    data['Month_cos'] = np.cos(data['Date'].dt.month * 2 * np.pi / 12)
+    return data
 
-print(data.tail())
-split_point = int(len(data) * 1)
-data = data.iloc[:split_point]
+def calculate_rolling_means(data):
 
-data['FTTG'] = data['Home Goals'] + data['Away Goals']
+    # Calculate rolling means
+    rolling_means_home_scored = data.groupby('Home')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+    rolling_means_home_conceded = data.groupby('Home')['Away Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+    rolling_means_away_conceded = data.groupby('Away')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+    rolling_means_away_scored = data.groupby('Away')['Away Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
 
-# Convert 'Date' column to datetime format
-data['Date'] = pd.to_datetime(data['Date'])
+    rolling_means_home_xg = data.groupby('Home')['xG'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+    rolling_means_away_xg = data.groupby('Home')['xG.1'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
 
-print(data.head())
+    data['Home_Scored_Rolling_Mean'] = rolling_means_home_scored
+    data['Home_Conceded_Rolling_Mean'] = rolling_means_home_conceded
+    data['Away_Scored_Rolling_Mean'] = rolling_means_away_scored
+    data['Away_Conceded_Rolling_Mean'] = rolling_means_away_conceded
 
+    data['Home_Xg_Rolling_Mean'] = rolling_means_home_xg
+    data['Away_Xg_Rolling_Mean'] = rolling_means_away_xg
 
-# Add additional features
-data['Year'] = data['Date'].dt.year
-data['is_weekend'] = (data['Date'].dt.dayofweek >= 5).astype(int)
-data['Month_sin'] = np.sin(data['Date'].dt.month * 2 * np.pi / 12)
-data['Month_cos'] = np.cos(data['Date'].dt.month * 2 * np.pi / 12)
+    # Goal difference
+    data['Home_Goal_Difference_Rolling_Mean'] = data['Home_Scored_Rolling_Mean'] - data['Home_Conceded_Rolling_Mean']
+    data['Away_Goal_Difference_Rolling_Mean'] = data['Away_Scored_Rolling_Mean'] - data['Away_Conceded_Rolling_Mean']
 
-# Calculate rolling means
-rolling_means_home_scored = data.groupby('Home')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-rolling_means_home_conceded = data.groupby('Home')['Away Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-rolling_means_away_conceded = data.groupby('Away')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-rolling_means_away_scored = data.groupby('Away')['Away Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+    return data
 
-rolling_means_home_xg = data.groupby('Home')['xG'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-rolling_means_away_xg = data.groupby('Home')['xG.1'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+def create_and_concat_dummy_variables(data):
+    dummy_away = pd.get_dummies(data['Away'], prefix='Away')
+    dummy_home = pd.get_dummies(data['Home'], prefix='Home')
+    data = pd.concat([data, dummy_away, dummy_home], axis=1)
+    return data
 
-data['Home_Scored_Rolling_Mean'] = rolling_means_home_scored
-data['Home_Conceded_Rolling_Mean'] = rolling_means_home_conceded
-data['Away_Scored_Rolling_Mean'] = rolling_means_away_scored
-data['Away_Conceded_Rolling_Mean'] = rolling_means_away_conceded
+def split_data(data):
+    train_size = int(len(data) * 0.6)
+    validation_size = int(len(data) * 0.2)
+    train = data.iloc[:train_size]
+    validation = data.iloc[train_size:train_size + validation_size]
+    test = data.iloc[train_size + validation_size:]
+    return train, validation, test
 
-data['Home_Xg_Rolling_Mean'] = rolling_means_home_xg
-data['Away_Xg_Rolling_Mean'] = rolling_means_away_xg
-
-# Goal difference
-data['Home_Goal_Difference_Rolling_Mean'] = data['Home_Scored_Rolling_Mean'] - data['Home_Conceded_Rolling_Mean']
-data['Away_Goal_Difference_Rolling_Mean'] = data['Away_Scored_Rolling_Mean'] - data['Away_Conceded_Rolling_Mean']
-
-# After calculating rolling means
-print(data.head())
-
-# Create dummy variables
-dummy_away = pd.get_dummies(data['Away'], prefix='Away_')
-dummy_home = pd.get_dummies(data['Home'], prefix='Home_')
-
-# Concatenate the dummy variables with the original DataFrame
-datax = pd.concat([data, dummy_away, dummy_home], axis=1)
-
-print(f'Dataframe after adding dummy variables: {data}')
-
-# Split the data
-train_size = int(len(data) * 0.6)
-validation_size = int(len(data) * 0.2)
-train = data.iloc[:train_size]
-validation = data.iloc[train_size:train_size + validation_size]
-test = data.iloc[train_size + validation_size:]
-
-# Function for mean target encoding
 def target_encode_simple(df_train, df, col, target):
     target_mean = df_train.groupby(col)[target].mean()
     return df[col].map(target_mean).fillna(df_train[target].mean())
 
-# Apply target encoding
-for col in ['Home', 'Away']:
-    train.loc[:, col + '_target_mean'] = target_encode_simple(train, train, col, 'Home Goals')
-    validation.loc[:, col + '_target_mean'] = target_encode_simple(train, validation, col, 'Home Goals')
-    test.loc[:, col + '_target_mean'] = target_encode_simple(train, test, col, 'Home Goals')
+def apply_target_encoding(train, validation, test):
+    for col in ['Home', 'Away']:
+        for df in [train, validation, test]:
+            target_encode_simple(train, df, col, 'Home Goals')
 
-#####
-import pandas as pd
-from scipy.stats import poisson
-from scipy.optimize import minimize_scalar
+def prepare_feature_columns(data, train, validation, test):
+    """
+    Prepares the feature columns based on specified criteria and splits the data into features (X) and target (y) sets.
+    """
+    # Combine all unique columns from both dataframes
+    combined_columns = set(data.columns) | set(train.columns)
 
-def find_lambda(prob_over_2_5_goals):
-    # Adjust the bounds if necessary, based on your data distribution
-    bounds = (0, 10)  
-    
-    def objective(lmbda):
-        return abs((1 - poisson.cdf(2, lmbda)) - prob_over_2_5_goals)
-
-    result = minimize_scalar(objective, bounds=bounds, method='bounded')
-    
-    if result.success:
-        return result.x
-    else:
-        # Handle edge cases or return a fallback value
-        if prob_over_2_5_goals > 0.99:
-            return bounds[1]  # High lambda for high probabilities
-        elif prob_over_2_5_goals < 0.01:
-            return bounds[0]  # Low lambda for low probabilities
-        return np.nan  # Or return NaN or a default value
-
-# Apply the function to the 'B365>2.5' column
-# data['Mean_Goals'] = data['B365>2.5'].apply(find_lambda)
-
-# First, combine all unique columns from both dataframes
-combined_columns = set(data.columns) | set(train.columns)
-
-# Then, filter columns based on your criteria
-all_cols = [
-    col for col in combined_columns
-    if col.startswith('Away') 
-    or col.startswith('Home') 
-    or col.endswith('target_mean') 
-    or col in [
-        'Year', 'Month_sin', 'Month_cos', 
-        'Home_Scored_Rolling_Mean', 'Home_Conceded_Rolling_Mean', 
-        'Away_Scored_Rolling_Mean', 'Away_Conceded_Rolling_Mean',
-        'Home_Goal_Difference_Rolling_Mean', 'Away_Goal_Difference_Rolling_Mean', 
-        'FTTG', 'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
+    # Filter columns based on specified criteria
+    all_cols = [
+        col for col in combined_columns
+        if col.startswith('Away') or col.startswith('Home') or col.endswith('target_mean') or col in [
+            'Year', 'Month_sin', 'Month_cos', 
+            'Home_Scored_Rolling_Mean', 'Home_Conceded_Rolling_Mean', 
+            'Away_Scored_Rolling_Mean', 'Away_Conceded_Rolling_Mean',
+            'Home_Goal_Difference_Rolling_Mean', 'Away_Goal_Difference_Rolling_Mean', 
+            'FTTG', 'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
+        ]
     ]
-]
 
-feature_cols = [
-    col for col in all_cols 
-    if 
-    #col.startswith('Away_') 
-    #or col.startswith('Home_')
-    # or col.endswith('target_mean') 
-    col in [
-        'Year'
-        ,'Month_sin'
-        ,'Month_cos'
-        #,'Home_Scored_Rolling_Mean' 
-        #,'Home_Conceded_Rolling_Mean' 
-        #,'Away_Scored_Rolling_Mean'
-        #,'Away_Conceded_Rolling_Mean'
-        #,'Home_Goal_Difference_Rolling_Mean'
-        #,'Away_Goal_Difference_Rolling_Mean'
-        ,'Home_Xg_Rolling_Mean'
-        ,'Away_Xg_Rolling_Mean'
-        
-        
+    feature_cols = [
+        col for col in all_cols 
+        if col in [
+            'Year', 'Month_sin', 'Month_cos', 'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
+        ]
     ]
-]
 
-train1 = train[all_cols].dropna()
-validation1 = validation[all_cols].dropna()
-test1 = test[all_cols].dropna()
+    # Prepare the data by filtering with all_cols and dropping NA values
+    train_prepared = train[all_cols].dropna()
+    validation_prepared = validation[all_cols].dropna()
+    test_prepared = test[all_cols].dropna()
 
-X_train = train1[feature_cols]
-y_train = train1['Home Goals']
-X_validation = validation1[feature_cols]
-y_validation = validation1['Home Goals']
-X_test = test1[feature_cols]
-y_test = test1['Home Goals']
+    # Split into features (X) and target (y)
+    X_train = train_prepared[feature_cols]
+    y_train = train_prepared['Home Goals']
+    X_validation = validation_prepared[feature_cols]
+    y_validation = validation_prepared['Home Goals']
+    X_test = test_prepared[feature_cols]
+    y_test = test_prepared['Home Goals']
 
+    return X_train, y_train, X_validation, y_validation, X_test, y_test
 
-# Train the model
-model = GradientBoostingRegressor(max_depth=2, min_samples_leaf=1, min_samples_split=2)
-model.fit(X_train, y_train)
+def train_model(X_train, y_train):
+    """Trains a Gradient Boosting Regressor model."""
+    model = GradientBoostingRegressor(max_depth=2, min_samples_leaf=1, min_samples_split=2)
+    model.fit(X_train, y_train)
+    return model
 
-# Evaluation on validation and test sets
-for X, y, dataset_name in [(X_validation, y_validation, 'Validation'), (X_test, y_test, 'Test')]:
+def evaluate_model(model, X, y, dataset_name):
+    """
+    Evaluates the given model on the provided dataset.
+    """
     predictions = model.predict(X)
     mse = mean_squared_error(y, predictions)
     print(f'Mean Squared Error on {dataset_name} Set: {mse}')
+    return mse
+
+def evaluate_baseline(y_train, y_validation, y_test):
+    """
+    Evaluates the baseline model using mean constant predictions.
+    """
+    mean_Home_Goals_train = y_train.mean()
+    mse_constant_validation = mean_squared_error(y_validation, np.full_like(y_validation, mean_Home_Goals_train))
+    mse_constant_test = mean_squared_error(y_test, np.full_like(y_test, mean_Home_Goals_train))
+    
+    print(f'Mean Squared Error with Constant Predictions on Validation Set: {mse_constant_validation}')
+    print(f'Mean Squared Error with Constant Predictions on Test Set: {mse_constant_test}')
+
+def visualize_feature_importances(model, X_train):
+    feature_importances = model.feature_importances_
+    features = X_train.columns
+    feature_importance_df = pd.DataFrame({'Feature': features, 'Importance': feature_importances}).sort_values(by='Importance', ascending=False)
+    
+    plt.figure(figsize=(10, 6))
+    plt.barh(feature_importance_df['Feature'], feature_importance_df['Importance'])
+    plt.xlabel('Importance')
+    plt.ylabel('Feature')
+    plt.title('Feature Importances in Gradient Boosting Model')
+    plt.gca().invert_yaxis()
+    plt.show()
+
+def visualize_actual_vs_predicted(y_test, predictions_test):
+    plt.scatter(y_test, predictions_test)
+    plt.xlabel('Actual Goals')
+    plt.ylabel('Predicted Goals')
+    plt.title('Actual vs Predicted Goals on Test Set')
+    plt.show()
+
+    # Displaying the last 5 predictions for review
+    print("Actual Last 5 Goals:", y_test[-5:])
+    print("Predicted Last 5 Goals:", predictions_test[-5:])
+
+def combine_predictions_with_actual(test, y_test, predictions_test):
+    predicted_goals_df = pd.DataFrame(predictions_test, columns=['Predicted_Home Goals'])
+    y_test_reset = y_test.reset_index(drop=True)
+    results_df = pd.concat([test[['Date', 'Home', 'Away']].reset_index(drop=True), y_test_reset, predicted_goals_df], axis=1)
+    results_df.rename(columns={'Home Goals': 'Actual_Home Goals'}, inplace=True)
+    print(results_df.tail(10))  # Adjust the number of rows displayed as needed
+
+def fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test):
+    X_train_glm = sm.add_constant(X_train, prepend=False, has_constant='add')
+    X_validation_glm = sm.add_constant(X_validation, prepend=False, has_constant='add')
+    X_test_glm = sm.add_constant(X_test, prepend=False, has_constant='add')
+    
+    glm_family = sm.families.Poisson()
+    glm_model = sm.GLM(y_train, X_train_glm, family=glm_family)
+    glm_results = glm_model.fit()
+    print(glm_results.summary())
+    
+    for X, y, dataset_name in [(X_validation_glm, y_validation, 'Validation'), (X_test_glm, y_test, 'Test')]:
+        predictions_glm = glm_results.predict(X)
+        mse_glm = mean_squared_error(y, predictions_glm)
+        print(f'Mean Squared Error for GLM on {dataset_name} Set: {mse_glm}')
 
 
+# Set pandas display option
+pd.set_option('display.max_columns', None)
 
+# Data processing
+data = scrape_and_clean_data(2017, 2021)
+data = add_total_goals_feature(data)
+data = convert_date_and_add_features(data)
+data = calculate_rolling_means(data)
+data = create_and_concat_dummy_variables(data)
 
-# Calculate the mean of the target variable in the training set
-mean_Home_Goals_train = y_train.mean()
+# Split data and apply encoding
+train, validation, test = split_data(data)
+apply_target_encoding(train, validation, test)
 
-# Create constant predictions for the validation and test sets
-constant_predictions_validation = np.full_like(y_validation, mean_Home_Goals_train)
-constant_predictions_test = np.full_like(y_test, mean_Home_Goals_train)
+# Feature preparation and model training
+X_train, y_train, X_validation, y_validation, X_test, y_test = prepare_feature_columns(data, train, validation, test)
+model = train_model(X_train, y_train)
 
-# Calculate MSE for constant predictions
-mse_constant_validation = mean_squared_error(y_validation, constant_predictions_validation)
-mse_constant_test = mean_squared_error(y_test, constant_predictions_test)
-
-# Print the MSE for constant predictions
-print(f'Mean Squared Error with Constant Predictions on Validation Set: {mse_constant_validation}')
-print(f'Mean Squared Error with Constant Predictions on Test Set: {mse_constant_test}')
-
-# Feature importance and visualization
-feature_importances = model.feature_importances_
-features = X_train.columns
-feature_importance_df = pd.DataFrame({'Feature': features, 'Importance': feature_importances}).sort_values(by='Importance', ascending=False)
-
-# Display feature importance
-print(feature_importance_df)
-
-# Visualize feature importances
-plt.figure(figsize=(10, 6))
-plt.barh(feature_importance_df['Feature'], feature_importance_df['Importance'])
-plt.xlabel('Importance')
-plt.ylabel('Feature')
-plt.title('Feature Importances in Gradient Boosting Model')
-plt.gca().invert_yaxis()
-plt.show()
-
-# Model Evaluation
+# Model predictions and evaluations
+predictions_validation = model.predict(X_validation)
 predictions_test = model.predict(X_test)
-mse_test = mean_squared_error(y_test, predictions_test)
-print(f'Mean Squared Error on Test Set: {mse_test}')
+evaluate_model(model, X_validation, y_validation, 'Validation')
+evaluate_model(model, X_test, y_test, 'Test')
 
-# Visualization of Actual vs Predicted Goals
-plt.scatter(y_test, predictions_test)
-plt.xlabel('Actual Goals')
-plt.ylabel('Predicted Goals')
-plt.title('Actual vs Predicted Goals on Test Set')
-plt.show()
+# Baseline evaluation
+evaluate_baseline(y_train, y_validation, y_test)
 
-print(y_test[-5:], predictions[-5:])
-
-# Assuming 'y_test' contains the actual goals and 'predictions_test' contains the predicted goals
-
-# Convert predictions to a DataFrame
-predicted_goals_df = pd.DataFrame(predictions_test, columns=['Predicted_Home Goals'])
-
-# Reset index of y_test to align with the index of predicted_goals_df
-y_test_reset = y_test.reset_index(drop=True)
-
-# Combine the test set information with the predictions
-results_df = pd.concat([test[['Date', 'Home', 'Away']].reset_index(drop=True), y_test_reset, predicted_goals_df], axis=1)
-
-# Rename columns for clarity
-results_df.rename(columns={'Home Goals': 'Actual_Home Goals'}, inplace=True)
-
-# Display the DataFrame
-print(results_df.tail(10))  # Adjust the number of rows displayed as needed
-
-# Evaluation on validation and test sets
-for X, y, dataset_name in [(X_validation, y_validation, 'Validation'), (X_test, y_test, 'Test')]:
-    predictions = model.predict(X)
-    mse = mean_squared_error(y, predictions)
-    print(f'Mean Squared Error on {dataset_name} Set: {mse}')
-
-# Calculate the mean of the target variable in the training set
-mean_Home_Goals_train = y_train.mean()
-
-# Create constant predictions for the validation and test sets
-constant_predictions_validation = np.full_like(y_validation, mean_Home_Goals_train)
-constant_predictions_test = np.full_like(y_test, mean_Home_Goals_train)
-
-# Calculate MSE for constant predictions
-mse_constant_validation = mean_squared_error(y_validation, constant_predictions_validation)
-mse_constant_test = mean_squared_error(y_test, constant_predictions_test)
-
-# Print the MSE for constant predictions
-print(f'Mean Squared Error with Constant Predictions on Validation Set: {mse_constant_validation}')
-print(f'Mean Squared Error with Constant Predictions on Test Set: {mse_constant_test}')
-
-
-# Add constant to training, validation, and test datasets
-X_train_glm = sm.add_constant(X_train, prepend=False, has_constant='add')
-X_validation_glm = sm.add_constant(X_validation, prepend=False, has_constant='add')
-X_test_glm = sm.add_constant(X_test, prepend=False, has_constant='add')
-
-print(X_test_glm)
-
-# Fit the GLM
-glm_family = sm.families.Poisson()
-glm_model = sm.GLM(y_train, X_train_glm, family=glm_family)
-glm_results = glm_model.fit()
-
-# Print GLM summary
-print(glm_results.summary())
-
-
-print(X_test_glm)
-
-
-# GLM Predictions and evaluation
-for X, y, dataset_name in [(X_validation_glm, y_validation, 'Validation'), (X_test_glm, y_test, 'Test')]:
-    predictions_glm = glm_results.predict(X)
-    mse_glm = mean_squared_error(y, predictions_glm)
-    print(f'Mean Squared Error for GLM on {dataset_name} Set: {mse_glm}')
-
-# Calculate the mean of the target variable in the training set
-mean_Home_Goals_test = y_test.mean()
-print(f'Mean of Home Goals in Training Set: {mean_Home_Goals_test}')
+# Visualization and additional model evaluation
+visualize_feature_importances(model, X_train)
+visualize_actual_vs_predicted(y_test, predictions_test)
+combine_predictions_with_actual(test, y_test, predictions_test)
+fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test)
