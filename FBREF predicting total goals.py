@@ -31,41 +31,34 @@ def convert_date_and_add_features(data):
     return data
 
 def calculate_rolling_means(data):
+    # Function to add rolling mean features for specified windows and metrics
+    def add_rolling_mean_features(data, groupby_col, target_col, windows):
+        for window in windows:
+            rolling_mean = data.groupby(groupby_col)[target_col].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+            feature_name = f"{groupby_col}_{target_col}_Rolling_Mean_{window}"
+            data[feature_name] = rolling_mean
 
-    windows = [20, 30, 40]
+    # Windows for rolling means
+    windows = [5, 10, 20, 30]
+
+    # Metrics for which we calculate rolling means
+    metrics = ['Home Goals', 'Away Goals', 'xG', 'xG.1']
+
+    # Calculate rolling means for home and away teams
+    for metric in metrics:
+        add_rolling_mean_features(data, 'Home', metric, windows)
+        add_rolling_mean_features(data, 'Away', metric, windows)
+
+    # Calculate rolling mean differences for goals and xG
     for window in windows:
-        # Calculate rolling means
-        data[f'Home_Scored_Rolling_Mean_{window}'] = data.groupby('Home')['Home Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-        data[f'Home_Conceded_Rolling_Mean_{window}'] = data.groupby('Home')['Away Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-        data[f'Away_Scored_Rolling_Mean_{window}'] = data.groupby('Away')['Home Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-        data[f'Away_Conceded_Rolling_Mean_{window}'] = data.groupby('Away')['Away Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-
-        # Goal difference
-        data[f'Home_Goal_Difference_Rolling_Mean_{window}'] = data[f'Home_Scored_Rolling_Mean_{window}'] - data[f'Home_Conceded_Rolling_Mean_{window}']
-        data[f'Away_Goal_Difference_Rolling_Mean_{window}'] = data[f'Away_Scored_Rolling_Mean_{window}'] - data[f'Away_Conceded_Rolling_Mean_{window}']
+        data[f'Home_Goal_Difference_Rolling_Mean_{window}'] = data[f'Home_Home Goals_Rolling_Mean_{window}'] - data[f'Home_Away Goals_Rolling_Mean_{window}']
+        data[f'Away_Goal_Difference_Rolling_Mean_{window}'] = data[f'Away_Away Goals_Rolling_Mean_{window}'] - data[f'Away_Home Goals_Rolling_Mean_{window}']
         
+        data[f'Home_Xg_Difference_Rolling_Mean_{window}'] = data[f'Home_xG_Rolling_Mean_{window}'] - data[f'Home_xG.1_Rolling_Mean_{window}']
+        data[f'Away_Xg_Difference_Rolling_Mean_{window}'] = data[f'Away_xG_Rolling_Mean_{window}'] - data[f'Away_xG.1_Rolling_Mean_{window}']
 
-        #print(data.head())
-
-        #print(data.groupby('Home').head(1))
-
-
-        #print(rolling_means_home_scored.head())
-
-
-
-        data['Home_Xg_Scored_Rolling_Mean'] = data.groupby('Home')['xG'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-        data['Home_Xg_Conceded_Rolling_Mean'] = data.groupby('Home')['xG.1'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-        data['Away_Xg_Scored_Rolling_Mean'] = data.groupby('Away')['xG'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-        data['Away_Xg_Conceded_Rolling_Mean'] = data.groupby('Away')['xG.1'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-
-
-        # Xg Goal difference
-        data['Home_Xg_Difference_Rolling_Mean'] = data['Home_Xg_Scored_Rolling_Mean'] - data['Home_Xg_Conceded_Rolling_Mean']
-        data['Away_Xg_Difference_Rolling_Mean'] = data['Away_Xg_Scored_Rolling_Mean'] - data['Away_Xg_Conceded_Rolling_Mean']
-
-        
     return data
+
 
 def create_and_concat_dummy_variables(data):
     dummy_away = pd.get_dummies(data['Away'], prefix='Away')
@@ -91,48 +84,27 @@ def apply_target_encoding(train, validation, test):
             target_encode_simple(train, df, col, 'Home Goals')
 
 def prepare_feature_columns(data, train, validation, test):
-    """
-    Prepares the feature columns based on specified criteria and splits the data into features (X) and target (y) sets.
-    """
-    combined_columns = set(data.columns) | set(train.columns)
+    # Define your features and target variable
+    rolling_features = [col for col in data.columns if 'Rolling_Mean' in col or 'Difference_Rolling_Mean' in col]
+    static_features = ['Year', 'Month_sin', 'Month_cos', 'is_weekend']
+    feature_cols = static_features + rolling_features
+    target_col = 'Home Goals'  # Assuming 'Home Goals' is your target variable
+    
+    # Preprocess Train, Validation, and Test sets
+    def preprocess(df):
+        # Drop NA values in a way that keeps X and y aligned
+        df_filtered = df.dropna(subset=feature_cols + [target_col])
+        X = df_filtered[feature_cols]
+        y = df_filtered[target_col]
+        return X, y
 
-    all_cols = [
-        col for col in combined_columns
-        if col.startswith('Away') or col.startswith('Home') or col.endswith('target_mean') or col in [
-            'Year', 'Month_sin', 'Month_cos', 
-            'Home_Scored_Rolling_Mean_20', 'Home_Conceded_Rolling_Mean_20', 
-            'Away_Scored_Rolling_Mean_20', 'Away_Conceded_Rolling_Mean_20',
-            'Home_Goal_Difference_Rolling_Mean_20', 'Away_Goal_Difference_Rolling_Mean_20', 
-            'FTTG', 
-            'Home_Xg_Scored_Rolling_Mean', 'Home_Xg_Conceded_Rolling_Mean', 'Away_Xg_Scored_Rolling_Mean', 'Away_Xg_Conceded_Rolling_Mean',
-            'Home_Xg_Difference_Rolling_Mean', 'Away_Xg_Difference_Rolling_Mean'
-        ]
-    ]
-
-    feature_cols = [
-        col for col in all_cols 
-        if col in [
-            'Year', 'Month_sin', 'Month_cos', 
-            'Home_Scored_Rolling_Mean_20', 'Home_Conceded_Rolling_Mean_20', 
-            'Away_Scored_Rolling_Mean_20', 'Away_Conceded_Rolling_Mean_20',
-            'Home_Goal_Difference_Rolling_Mean_20', 'Away_Goal_Difference_Rolling_Mean_20', 
-            'Home_Xg_Scored_Rolling_Mean', 'Home_Xg_Conceded_Rolling_Mean', 'Away_Xg_Scored_Rolling_Mean', 'Away_Xg_Conceded_Rolling_Mean',
-            'Home_Xg_Difference_Rolling_Mean', 'Away_Xg_Difference_Rolling_Mean'
-        ]
-    ]
-
-    train_prepared = train[all_cols].dropna()
-    validation_prepared = validation[all_cols].dropna()
-    test_prepared = test[all_cols].dropna()
-
-    X_train = train_prepared[feature_cols]
-    y_train = train_prepared['Home Goals']
-    X_validation = validation_prepared[feature_cols]
-    y_validation = validation_prepared['Home Goals']
-    X_test = test_prepared[feature_cols]
-    y_test = test_prepared['Home Goals']
+    X_train, y_train = preprocess(train)
+    X_validation, y_validation = preprocess(validation)
+    X_test, y_test = preprocess(test)
 
     return X_train, y_train, X_validation, y_validation, X_test, y_test
+
+
 
 def train_model(X_train, y_train):
     """Trains a Gradient Boosting Regressor model."""
@@ -145,6 +117,216 @@ def train_xgb_model(X_train, y_train):
     model = xgb.XGBRegressor(objective='reg:squarederror', max_depth=3, n_estimators=100, learning_rate=0.1)
     model.fit(X_train, y_train)
     return model
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+from sklearn.model_selection import BaseCrossValidator
+import numpy as np
+
+class BlockedTimeSeriesSplit(BaseCrossValidator):
+    def __init__(self, n_splits):
+        self.n_splits = n_splits
+
+    def get_n_splits(self, X, y=None, groups=None):
+        return self.n_splits
+
+    def split(self, X, y=None, groups=None):
+        n_samples = len(X)
+        k_fold_size = n_samples // self.n_splits
+        indices = np.arange(n_samples)
+
+        margin = 0
+        for i in range(self.n_splits):
+            start = i * k_fold_size
+            stop = start + k_fold_size
+            mid = int(0.8 * (stop - start)) + start
+            yield indices[start: mid], indices[mid + margin: stop]
+
+
+
+
+from sklearn.model_selection import GridSearchCV
+
+def tune_xgb_model(X_train, y_train, param_grid, cv_splits):
+    """
+    Performs hyperparameter tuning for an XGBoost model using Blocked Cross-Validation.
+    
+    Parameters:
+    - X_train: Training features
+    - y_train: Training target variable
+    - param_grid: Dictionary with parameters names (`str`) as keys and lists of parameter settings to try as values.
+    - cv_splits: Number of splits to use for Blocked Time Series Cross-Validation.
+    
+    Returns:
+    - Best estimator after tuning.
+    """
+    model = xgb.XGBRegressor(objective='reg:squarederror')
+    cv = BlockedTimeSeriesSplit(n_splits=cv_splits)
+    grid_search = GridSearchCV(model, param_grid, cv=cv, scoring='neg_mean_squared_error', verbose=1, n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    
+    print("Best parameters:", grid_search.best_params_)
+    print("Best CV score:", -grid_search.best_score_)
+    
+    return grid_search.best_estimator_
+
+
+
+
+from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
+
+def tune_xgb_model_with_timeseries_cv(X_train, y_train, param_grid, n_splits):
+    """
+    Performs hyperparameter tuning for an XGBoost model using Time Series Split Cross-Validation.
+    
+    Parameters:
+    - X_train: Training features
+    - y_train: Training target variable
+    - param_grid: Dictionary with parameters names (`str`) as keys and lists of parameter settings to try as values.
+    - n_splits: Number of splits to use for Time Series Cross-Validation.
+    
+    Returns:
+    - Best estimator after tuning.
+    """
+    model = xgb.XGBRegressor(objective='reg:squarederror')
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    grid_search = GridSearchCV(model, param_grid, cv=tscv, scoring='neg_mean_squared_error', verbose=1, n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    
+    print("Best parameters found: ", grid_search.best_params_)
+    print("Best CV score: ", -grid_search.best_score_)
+    
+    return grid_search.best_estimator_
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def tune_GBR_model(X_train, y_train, param_grid, cv_splits):
+    """
+    Performs hyperparameter tuning for an XGBoost model using Blocked Cross-Validation.
+    
+    Parameters:
+    - X_train: Training features
+    - y_train: Training target variable
+    - param_grid: Dictionary with parameters names (`str`) as keys and lists of parameter settings to try as values.
+    - cv_splits: Number of splits to use for Blocked Time Series Cross-Validation.
+    
+    Returns:
+    - Best estimator after tuning.
+    """
+    model = GradientBoostingRegressor()
+    cv = BlockedTimeSeriesSplit(n_splits=cv_splits)
+    grid_search = GridSearchCV(model, param_grid, cv=cv, scoring='neg_mean_squared_error', verbose=1, n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    
+    print("Best parameters:", grid_search.best_params_)
+    print("Best CV score:", -grid_search.best_score_)
+    
+    return grid_search.best_estimator_
+
+
+def tune_GBR_model_with_timeseries_cv(X_train, y_train, param_grid, n_splits):
+    """
+    Performs hyperparameter tuning for an XGBoost model using Time Series Split Cross-Validation.
+    
+    Parameters:
+    - X_train: Training features
+    - y_train: Training target variable
+    - param_grid: Dictionary with parameters names (`str`) as keys and lists of parameter settings to try as values.
+    - n_splits: Number of splits to use for Time Series Cross-Validation.
+    
+    Returns:
+    - Best estimator after tuning.
+    """
+    model = GradientBoostingRegressor()
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    grid_search = GridSearchCV(model, param_grid, cv=tscv, scoring='neg_mean_squared_error', verbose=1, n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    
+    print("Best parameters found: ", grid_search.best_params_)
+    print("Best CV score: ", -grid_search.best_score_)
+    
+    return grid_search.best_estimator_
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def evaluate_model(model, X, y, dataset_name):
     """
@@ -176,6 +358,8 @@ def evaluate_baseline(y_train, y_validation, y_test):
     Evaluates the baseline model using mean constant predictions.
     """
     mean_Home_Goals_train = y_train.mean()
+    mean_Home_Goals_test = y_test.mean()
+    print(f'mean home goals is {mean_Home_Goals_test:.2f}')
     mse_constant_validation = mean_squared_error(y_validation, np.full_like(y_validation, mean_Home_Goals_train))
     mse_constant_test = mean_squared_error(y_test, np.full_like(y_test, mean_Home_Goals_train))
     
@@ -211,12 +395,12 @@ def combine_predictions_with_actual(test, X_test, y_test, predictions_test):
     X_test_reset = X_test.reset_index(drop=True)
     results_df = pd.concat([test[['Date', 'Home', 'Away']].reset_index(drop=True), X_test_reset, y_test_reset, predicted_goals_df], axis=1)
     results_df.rename(columns={'Home Goals': 'Actual_Home Goals'}, inplace=True)
-    print(results_df.tail(50))  # Adjust the number of rows displayed as needed
+    #print(results_df.tail(50))  # Adjust the number of rows displayed as needed
 
-    
-    sample_team = results_df[results_df['Home'] == 'Manchester City']  # Replace 'SampleTeam' with an actual team name
+    print(pd.DataFrame(predictions_test).tail(20))
+    sample_team = results_df[results_df['Home'] == 'Brentford']  # Replace 'SampleTeam' with an actual team name
     print("#############################")
-    print(sample_team[['Home', 'Away', 'Actual_Home Goals', 'Home_Scored_Rolling_Mean_20']].tail(50))
+    print(sample_team[['Home', 'Away', 'Actual_Home Goals', 'Predicted_Home Goals']].tail(50))
 
 
 
@@ -229,7 +413,7 @@ pd.set_option('display.max_columns', None)
 
 
 # Data processing
-data = scrape_and_clean_data(2017, 2023)
+data = scrape_and_clean_data(2017, 2024)
 data = add_total_goals_feature(data)
 data = convert_date_and_add_features(data)
 data = calculate_rolling_means(data)
@@ -244,10 +428,53 @@ X_train, y_train, X_validation, y_validation, X_test, y_test = prepare_feature_c
 model = train_model(X_train, y_train)
 xgb_model = train_xgb_model(X_train, y_train)
 
+
+
+
+
+
+
+param_grid = {
+    'max_depth': [3, 4, 5],
+    'n_estimators': [100, 200, 300],
+    'learning_rate': [0.01, 0.1, 0.2]
+}
+
+# Adjust the number of splits based on your dataset size and temporal granularity
+cv_splits = 5
+
+#best_xgb_model_blocked_ts_cv = tune_xgb_model(X_train, y_train, param_grid, cv_splits)
+#best_xgb_model_ts_cv = tune_xgb_model_with_timeseries_cv(X_train, y_train, param_grid, cv_splits)
+#best_GBR_model_blocked_ts_cv = tune_GBR_model(X_train, y_train, param_grid, cv_splits)
+#best_GBR_model_ts_cv = tune_GBR_model_with_timeseries_cv(X_train, y_train, param_grid, cv_splits)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Model predictions and evaluations
 predictions_validation = model.predict(X_validation)
 predictions_test = model.predict(X_test)
 
+#for model in [model, xgb_model, best_xgb_model_blocked_ts_cv, best_xgb_model_ts_cv, best_GBR_model_blocked_ts_cv, best_GBR_model_ts_cv]:
 for model in [model, xgb_model]:
     evaluate_model(model, X_validation, y_validation, 'Validation')
     evaluate_model(model, X_test, y_test, 'Test')
@@ -264,6 +491,16 @@ visualize_actual_vs_predicted(y_test, predictions_test)
 
 X_train, y_train, X_validation, y_validation, X_test, y_test = prepare_feature_columns(data, train, validation, test)
 combine_predictions_with_actual(test, X_test, y_test, predictions_test)
+
+
+
+
+
+
+
+
+
+
 
 
 
