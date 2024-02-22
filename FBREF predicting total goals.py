@@ -8,6 +8,8 @@ from sklearn.tree import export_graphviz
 import graphviz
 import statsmodels.api as sm
 from sklearn.feature_selection import RFE
+import xgboost as xgb
+
 
 
 def scrape_and_clean_data(start_year, end_year):
@@ -30,27 +32,39 @@ def convert_date_and_add_features(data):
 
 def calculate_rolling_means(data):
 
-    # Calculate rolling means
-    rolling_means_home_scored = data.groupby('Home')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-    rolling_means_home_conceded = data.groupby('Home')['Away Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-    rolling_means_away_conceded = data.groupby('Away')['Home Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-    rolling_means_away_scored = data.groupby('Away')['Away Goals'].rolling(window=10, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+    windows = [20, 30, 40]
+    for window in windows:
+        # Calculate rolling means
+        data[f'Home_Scored_Rolling_Mean_{window}'] = data.groupby('Home')['Home Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+        data[f'Home_Conceded_Rolling_Mean_{window}'] = data.groupby('Home')['Away Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+        data[f'Away_Scored_Rolling_Mean_{window}'] = data.groupby('Away')['Home Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+        data[f'Away_Conceded_Rolling_Mean_{window}'] = data.groupby('Away')['Away Goals'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
 
-    rolling_means_home_xg = data.groupby('Home')['xG'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
-    rolling_means_away_xg = data.groupby('Home')['xG.1'].rolling(window=40, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+        # Goal difference
+        data[f'Home_Goal_Difference_Rolling_Mean_{window}'] = data[f'Home_Scored_Rolling_Mean_{window}'] - data[f'Home_Conceded_Rolling_Mean_{window}']
+        data[f'Away_Goal_Difference_Rolling_Mean_{window}'] = data[f'Away_Scored_Rolling_Mean_{window}'] - data[f'Away_Conceded_Rolling_Mean_{window}']
+        
 
-    data['Home_Scored_Rolling_Mean'] = rolling_means_home_scored
-    data['Home_Conceded_Rolling_Mean'] = rolling_means_home_conceded
-    data['Away_Scored_Rolling_Mean'] = rolling_means_away_scored
-    data['Away_Conceded_Rolling_Mean'] = rolling_means_away_conceded
+        #print(data.head())
 
-    data['Home_Xg_Rolling_Mean'] = rolling_means_home_xg
-    data['Away_Xg_Rolling_Mean'] = rolling_means_away_xg
+        #print(data.groupby('Home').head(1))
 
-    # Goal difference
-    data['Home_Goal_Difference_Rolling_Mean'] = data['Home_Scored_Rolling_Mean'] - data['Home_Conceded_Rolling_Mean']
-    data['Away_Goal_Difference_Rolling_Mean'] = data['Away_Scored_Rolling_Mean'] - data['Away_Conceded_Rolling_Mean']
 
+        #print(rolling_means_home_scored.head())
+
+
+
+        data['Home_Xg_Scored_Rolling_Mean'] = data.groupby('Home')['xG'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+        data['Home_Xg_Conceded_Rolling_Mean'] = data.groupby('Home')['xG.1'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+        data['Away_Xg_Scored_Rolling_Mean'] = data.groupby('Away')['xG'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+        data['Away_Xg_Conceded_Rolling_Mean'] = data.groupby('Away')['xG.1'].rolling(window=window, min_periods=1, closed='left').mean().reset_index(level=0, drop=True)
+
+
+        # Xg Goal difference
+        data['Home_Xg_Difference_Rolling_Mean'] = data['Home_Xg_Scored_Rolling_Mean'] - data['Home_Xg_Conceded_Rolling_Mean']
+        data['Away_Xg_Difference_Rolling_Mean'] = data['Away_Xg_Scored_Rolling_Mean'] - data['Away_Xg_Conceded_Rolling_Mean']
+
+        
     return data
 
 def create_and_concat_dummy_variables(data):
@@ -86,10 +100,12 @@ def prepare_feature_columns(data, train, validation, test):
         col for col in combined_columns
         if col.startswith('Away') or col.startswith('Home') or col.endswith('target_mean') or col in [
             'Year', 'Month_sin', 'Month_cos', 
-            'Home_Scored_Rolling_Mean', 'Home_Conceded_Rolling_Mean', 
-            'Away_Scored_Rolling_Mean', 'Away_Conceded_Rolling_Mean',
-            'Home_Goal_Difference_Rolling_Mean', 'Away_Goal_Difference_Rolling_Mean', 
-            'FTTG', 'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
+            'Home_Scored_Rolling_Mean_20', 'Home_Conceded_Rolling_Mean_20', 
+            'Away_Scored_Rolling_Mean_20', 'Away_Conceded_Rolling_Mean_20',
+            'Home_Goal_Difference_Rolling_Mean_20', 'Away_Goal_Difference_Rolling_Mean_20', 
+            'FTTG', 
+            'Home_Xg_Scored_Rolling_Mean', 'Home_Xg_Conceded_Rolling_Mean', 'Away_Xg_Scored_Rolling_Mean', 'Away_Xg_Conceded_Rolling_Mean',
+            'Home_Xg_Difference_Rolling_Mean', 'Away_Xg_Difference_Rolling_Mean'
         ]
     ]
 
@@ -97,10 +113,11 @@ def prepare_feature_columns(data, train, validation, test):
         col for col in all_cols 
         if col in [
             'Year', 'Month_sin', 'Month_cos', 
-            'Home_Scored_Rolling_Mean', 'Home_Conceded_Rolling_Mean', 
-            'Away_Scored_Rolling_Mean', 'Away_Conceded_Rolling_Mean',
-            'Home_Goal_Difference_Rolling_Mean', 'Away_Goal_Difference_Rolling_Mean', 
-            'Home_Xg_Rolling_Mean', 'Away_Xg_Rolling_Mean'
+            'Home_Scored_Rolling_Mean_20', 'Home_Conceded_Rolling_Mean_20', 
+            'Away_Scored_Rolling_Mean_20', 'Away_Conceded_Rolling_Mean_20',
+            'Home_Goal_Difference_Rolling_Mean_20', 'Away_Goal_Difference_Rolling_Mean_20', 
+            'Home_Xg_Scored_Rolling_Mean', 'Home_Xg_Conceded_Rolling_Mean', 'Away_Xg_Scored_Rolling_Mean', 'Away_Xg_Conceded_Rolling_Mean',
+            'Home_Xg_Difference_Rolling_Mean', 'Away_Xg_Difference_Rolling_Mean'
         ]
     ]
 
@@ -123,13 +140,19 @@ def train_model(X_train, y_train):
     model.fit(X_train, y_train)
     return model
 
+def train_xgb_model(X_train, y_train):
+    """Trains an XGBoost Regressor model."""
+    model = xgb.XGBRegressor(objective='reg:squarederror', max_depth=3, n_estimators=100, learning_rate=0.1)
+    model.fit(X_train, y_train)
+    return model
+
 def evaluate_model(model, X, y, dataset_name):
     """
     Evaluates the given model on the provided dataset.
     """
     predictions = model.predict(X)
     mse = mean_squared_error(y, predictions)
-    print(f'Mean Squared Error on {dataset_name} Set: {mse:.2f}')
+    print(f'Mean Squared Error for {model} on {dataset_name} Set: {mse:.2f}')
     return mse
 
 def fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test):
@@ -146,7 +169,7 @@ def fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X
         mse_glm = mean_squared_error(y, predictions_glm)
         print(f'Mean Squared Error for GLM on {dataset_name} Set: {mse_glm:.2f}')
     
-    #print(glm_results.summary())
+    print(glm_results.summary())
 
 def evaluate_baseline(y_train, y_validation, y_test):
     """
@@ -190,6 +213,11 @@ def combine_predictions_with_actual(test, X_test, y_test, predictions_test):
     results_df.rename(columns={'Home Goals': 'Actual_Home Goals'}, inplace=True)
     print(results_df.tail(50))  # Adjust the number of rows displayed as needed
 
+    
+    sample_team = results_df[results_df['Home'] == 'Manchester City']  # Replace 'SampleTeam' with an actual team name
+    print("#############################")
+    print(sample_team[['Home', 'Away', 'Actual_Home Goals', 'Home_Scored_Rolling_Mean_20']].tail(50))
+
 
 
 
@@ -214,12 +242,16 @@ apply_target_encoding(train, validation, test)
 # Feature preparation and model training
 X_train, y_train, X_validation, y_validation, X_test, y_test = prepare_feature_columns(data, train, validation, test)
 model = train_model(X_train, y_train)
+xgb_model = train_xgb_model(X_train, y_train)
 
 # Model predictions and evaluations
 predictions_validation = model.predict(X_validation)
 predictions_test = model.predict(X_test)
-evaluate_model(model, X_validation, y_validation, 'Validation')
-evaluate_model(model, X_test, y_test, 'Test')
+
+for model in [model, xgb_model]:
+    evaluate_model(model, X_validation, y_validation, 'Validation')
+    evaluate_model(model, X_test, y_test, 'Test')
+
 fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test)
 
 # Baseline evaluation
