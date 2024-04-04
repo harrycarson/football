@@ -522,10 +522,10 @@ cv_splits = 5
 
 # List of tuning functions for each model
 tuning_functions = [
-    # (tune_xgb_model, 'XGB Tuned'),
-    # (tune_xgb_model_with_timeseries_cv, 'XGB TS Tuned'),
+    (tune_xgb_model, 'XGB Tuned'),
+    (tune_xgb_model_with_timeseries_cv, 'XGB TS Tuned'),
     (tune_GBR_model, 'GBR Tuned'),
-    # (tune_GBR_model_with_timeseries_cv, 'GBR TS Tuned')
+    (tune_GBR_model_with_timeseries_cv, 'GBR TS Tuned')
 ]
 
 # Iterate over each tuning function and evaluate the tuned models
@@ -536,11 +536,6 @@ for tune_func, model_name in tuning_functions:
     # Evaluating the tuned model on validation and test sets
     evaluate_model(best_model, X_validation, y_validation, model_name + ' Validation')
     evaluate_model(best_model, X_test, y_test, model_name + ' Test')
-
-
-
-
-
 
 
 
@@ -583,7 +578,7 @@ combine_predictions_with_actual(test, X_test, y_test, predictions_test)
 
 
 
-
+print("this is ensemble branch")
 
 
 
