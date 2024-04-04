@@ -18,6 +18,65 @@ def scrape_and_clean_data(start_year, end_year):
     data = data.dropna()
     return data
 
+def initialize_unique_teams(data):
+    """Initialize unique teams from the dataset."""
+    return pd.concat([data['Home'], data['Away']]).unique()
+
+def expected_result(elo_a, elo_b, elo_width=400):
+    """Calculate the expected result of a match between two teams."""
+    return 1.0 / (1 + 10 ** ((elo_b - elo_a) / elo_width))
+
+def update_elo_match(winner_elo, loser_elo, draw=False, k_factor=30):
+    """Update Elo ratings after a match."""
+    expected_win = expected_result(winner_elo, loser_elo)
+    if draw:
+        change = k_factor * (0.5 - expected_win)
+    else:
+        change = k_factor * (1 - expected_win)
+    winner_elo += change
+    loser_elo -= change
+    return winner_elo, loser_elo
+
+def update_elos_in_data(data, team_elos, base_elo=1500):
+    """Update Elo ratings within the dataset."""
+    for index, row in data.iterrows():
+        home_team, away_team = row['Home'], row['Away']
+        home_elo, away_elo = team_elos.get(home_team, base_elo), team_elos.get(away_team, base_elo)
+
+        data.at[index, 'HomeElo'] = home_elo
+        data.at[index, 'AwayElo'] = away_elo
+
+        home_goals, away_goals = row['Home Goals'], row['Away Goals']
+        if home_goals > away_goals:
+            home_elo, away_elo = update_elo_match(home_elo, away_elo)
+        elif home_goals < away_goals:
+            away_elo, home_elo = update_elo_match(away_elo, home_elo)
+        else:
+            home_elo, away_elo = update_elo_match(home_elo, away_elo, draw=True)
+
+        team_elos[home_team] = home_elo
+        team_elos[away_team] = away_elo
+
+    return data
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def add_total_goals_feature(data):
     data['FTTG'] = data['Home Goals'] + data['Away Goals']
     return data
@@ -39,7 +98,7 @@ def calculate_rolling_means(data):
             data[feature_name] = rolling_mean
 
     # Windows for rolling means
-    windows = [5, 10, 20, 30]
+    windows = [5,10,20,30]
 
     # Metrics for which we calculate rolling means
     metrics = ['Home Goals', 'Away Goals', 'xG', 'xG.1']
@@ -57,6 +116,7 @@ def calculate_rolling_means(data):
         data[f'Home_Xg_Difference_Rolling_Mean_{window}'] = data[f'Home_xG_Rolling_Mean_{window}'] - data[f'Home_xG.1_Rolling_Mean_{window}']
         data[f'Away_Xg_Difference_Rolling_Mean_{window}'] = data[f'Away_xG_Rolling_Mean_{window}'] - data[f'Away_xG.1_Rolling_Mean_{window}']
 
+        data[f'Home_Minus_Away_Xg_Difference_Rolling_Mean_{window}'] = data[f'Home_Xg_Difference_Rolling_Mean_{window}'] - data[f'Away_Xg_Difference_Rolling_Mean_{window}']
     return data
 
 
@@ -87,7 +147,8 @@ def prepare_feature_columns(data, train, validation, test):
     # Define your features and target variable
     rolling_features = [col for col in data.columns if 'Rolling_Mean' in col or 'Difference_Rolling_Mean' in col]
     static_features = ['Year', 'Month_sin', 'Month_cos', 'is_weekend']
-    feature_cols = static_features + rolling_features
+    elo_features = ['HomeElo', 'AwayElo']
+    feature_cols = static_features + rolling_features + elo_features
     target_col = 'Home Goals'  # Assuming 'Home Goals' is your target variable
     
     # Preprocess Train, Validation, and Test sets
@@ -334,7 +395,7 @@ def evaluate_model(model, X, y, dataset_name):
     """
     predictions = model.predict(X)
     mse = mean_squared_error(y, predictions)
-    print(f'Mean Squared Error for {model} on {dataset_name} Set: {mse:.2f}')
+    print(f'Mean Squared Error for {dataset_name} (model and dataset name): {mse:.2f}')
     return mse
 
 def fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test):
@@ -414,10 +475,15 @@ pd.set_option('display.max_columns', None)
 
 # Data processing
 data = scrape_and_clean_data(2017, 2024)
+unique_teams = initialize_unique_teams(data)
+team_elos = {team: 1500 for team in unique_teams}
+data = update_elos_in_data(data, team_elos)
 data = add_total_goals_feature(data)
 data = convert_date_and_add_features(data)
 data = calculate_rolling_means(data)
 data = create_and_concat_dummy_variables(data)
+
+print(data.sample(12))
 
 # Split data and apply encoding
 train, validation, test = split_data(data)
@@ -431,27 +497,45 @@ xgb_model = train_xgb_model(X_train, y_train)
 
 
 
-
-
-
 param_grid = {
-    'max_depth': [3, 4, 5],
-    'n_estimators': [100, 200, 300],
-    'learning_rate': [0.01, 0.1, 0.2]
+    'max_depth': [2, 3, 4, 5],
+    'n_estimators': [50, 100, 200, 300],
+    'learning_rate': [0.01, 0.05, 0.1, 0.2]
 }
+
+
+# param_grid = {
+#     'max_depth': [2],
+#     'n_estimators': [50],
+#     'learning_rate': [0.05]
+# }
 
 # Adjust the number of splits based on your dataset size and temporal granularity
 cv_splits = 5
 
-#best_xgb_model_blocked_ts_cv = tune_xgb_model(X_train, y_train, param_grid, cv_splits)
-#best_xgb_model_ts_cv = tune_xgb_model_with_timeseries_cv(X_train, y_train, param_grid, cv_splits)
-#best_GBR_model_blocked_ts_cv = tune_GBR_model(X_train, y_train, param_grid, cv_splits)
-#best_GBR_model_ts_cv = tune_GBR_model_with_timeseries_cv(X_train, y_train, param_grid, cv_splits)
 
 
 
 
 
+
+
+# List of tuning functions for each model
+tuning_functions = [
+    # (tune_xgb_model, 'XGB Tuned'),
+    # (tune_xgb_model_with_timeseries_cv, 'XGB TS Tuned'),
+    (tune_GBR_model, 'GBR Tuned'),
+    # (tune_GBR_model_with_timeseries_cv, 'GBR TS Tuned')
+]
+
+# Iterate over each tuning function and evaluate the tuned models
+for tune_func, model_name in tuning_functions:
+    # Tuning the model
+    best_model = tune_func(X_train, y_train, param_grid, cv_splits)
+    
+    # Evaluating the tuned model on validation and test sets
+    evaluate_model(best_model, X_validation, y_validation, model_name + ' Validation')
+    evaluate_model(best_model, X_test, y_test, model_name + ' Test')
 
 
 
