@@ -11,8 +11,8 @@ from sklearn.feature_selection import RFE
 import xgboost as xgb
 
 
-
 def scrape_and_clean_data(start_year, end_year):
+
     """Scrape Premier League fixtures and scores from the 2017/2018 to the 2022/2023 seasons"""
     data = scrape_premier_league_fixtures(start_year, end_year)
     data = data.dropna()
@@ -45,6 +45,7 @@ def update_elos_in_data(data, team_elos, base_elo=1500):
 
         data.at[index, 'HomeElo'] = home_elo
         data.at[index, 'AwayElo'] = away_elo
+        data.at[index, 'EloDifference'] = home_elo / away_elo
 
         home_goals, away_goals = row['Home Goals'], row['Away Goals']
         if home_goals > away_goals:
@@ -147,7 +148,7 @@ def prepare_feature_columns(data, train, validation, test):
     # Define your features and target variable
     rolling_features = [col for col in data.columns if 'Rolling_Mean' in col or 'Difference_Rolling_Mean' in col]
     static_features = ['Year', 'Month_sin', 'Month_cos', 'is_weekend']
-    elo_features = ['HomeElo', 'AwayElo']
+    elo_features = ['HomeElo', 'AwayElo', 'EloDifference']
     feature_cols = static_features + rolling_features + elo_features
     target_col = 'Home Goals'  # Assuming 'Home Goals' is your target variable
     
@@ -514,62 +515,56 @@ param_grid = {
 cv_splits = 5
 
 
-
-
-
-
-
+""""""
+# Function definitions for evaluating and visualizing models are assumed to be available.
 
 # List of tuning functions for each model
 tuning_functions = [
     (tune_xgb_model, 'XGB Tuned'),
-    (tune_xgb_model_with_timeseries_cv, 'XGB TS Tuned'),
-    (tune_GBR_model, 'GBR Tuned'),
-    (tune_GBR_model_with_timeseries_cv, 'GBR TS Tuned')
+    # (tune_xgb_model_with_timeseries_cv, 'XGB TS Tuned'),
+    # (tune_GBR_model, 'GBR Tuned'),
+    # (tune_GBR_model_with_timeseries_cv, 'GBR TS Tuned')
 ]
 
-# Iterate over each tuning function and evaluate the tuned models
-for tune_func, model_name in tuning_functions:
-    # Tuning the model
-    best_model = tune_func(X_train, y_train, param_grid, cv_splits)
+# List of additional models to evaluate
+additional_models = [model, xgb_model]
+
+"""
+
+# Function to tune and evaluate a model
+def tune_and_evaluate_models(tuning_functions, X_train, y_train, X_validation, y_validation, X_test, y_test):
+    for tune_func, model_name in tuning_functions:
+        # Tuning the model
+        best_model = tune_func(X_train, y_train, param_grid, cv_splits)
+        
+        # Evaluating the tuned model on validation and test sets
+        evaluate_model(best_model, X_validation, y_validation, model_name + ' Validation')
+        evaluate_model(best_model, X_test, y_test, model_name + ' Test')
+
+# Tune and evaluate all specified models
+tune_and_evaluate_models(tuning_functions, X_train, y_train, X_validation, y_validation, X_test, y_test)
+
+# Function to evaluate non-tuned models and the baseline
+def evaluate_additional_models(models, X_train, y_train, X_validation, y_validation, X_test, y_test):
+    for model in models:
+        evaluate_model(model, X_validation, y_validation, 'Validation')
+        evaluate_model(model, X_test, y_test, 'Test')
     
-    # Evaluating the tuned model on validation and test sets
-    evaluate_model(best_model, X_validation, y_validation, model_name + ' Validation')
-    evaluate_model(best_model, X_test, y_test, model_name + ' Test')
+    # Evaluate GLM and baseline models
+    fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test)
+    evaluate_baseline(y_train, y_validation, y_test)
 
+# Evaluate additional models
+evaluate_additional_models(additional_models, X_train, y_train, X_validation, y_validation, X_test, y_test)
+"""
 
-
-
-
-
-
-
-
-
-
-
-
-# Model predictions and evaluations
-predictions_validation = model.predict(X_validation)
-predictions_test = model.predict(X_test)
-
-#for model in [model, xgb_model, best_xgb_model_blocked_ts_cv, best_xgb_model_ts_cv, best_GBR_model_blocked_ts_cv, best_GBR_model_ts_cv]:
-for model in [model, xgb_model]:
-    evaluate_model(model, X_validation, y_validation, 'Validation')
-    evaluate_model(model, X_test, y_test, 'Test')
-
-fit_and_evaluate_glm(y_train, X_train, y_validation, X_validation, y_test, X_test)
-
-# Baseline evaluation
-evaluate_baseline(y_train, y_validation, y_test)
-
-# Visualization and additional model evaluation
+# Visualization and combination of predictions with actual values
 visualize_feature_importances(model, X_train)
-visualize_actual_vs_predicted(y_test, predictions_test)
-#combine_predictions_with_actual(data, test, y_test, predictions_test)
+visualize_actual_vs_predicted(y_test, model.predict(X_test))
 
+# Assume 'prepare_feature_columns' and 'combine_predictions_with_actual' functions are defined
 X_train, y_train, X_validation, y_validation, X_test, y_test = prepare_feature_columns(data, train, validation, test)
-combine_predictions_with_actual(test, X_test, y_test, predictions_test)
+combine_predictions_with_actual(test, X_test, y_test, model.predict(X_test))
 
 
 
@@ -578,10 +573,56 @@ combine_predictions_with_actual(test, X_test, y_test, predictions_test)
 
 
 
-print("this is ensemble branch")
 
 
 
 
 
 
+
+
+
+from sklearn.metrics import mean_squared_error, r2_score
+
+def ensemble_models(models, X, weights=None):
+    if weights is None:
+        weights = [1 / len(models)] * len(models)  # Equal weighting if none provided
+    ensemble_prediction = np.zeros_like(models[0].predict(X))
+    for model, weight in zip(models, weights):
+        ensemble_prediction += weight * model.predict(X)
+    return ensemble_prediction / sum(weights)
+
+def tune_evaluate_and_ensemble_models(tuning_functions, additional_models, X_train, y_train, X_validation, y_validation, X_test, y_test, models_to_ensemble):
+    tuned_models = []
+    model_predictions = []
+    for tune_func, model_name in tuning_functions:
+        best_model = tune_func(X_train, y_train, param_grid, cv_splits) 
+        evaluate_model(best_model, X_validation, y_validation, model_name + ' Validation')
+        evaluate_model(best_model, X_test, y_test, model_name + ' Test')
+        tuned_models.append((best_model, model_name))
+        model_predictions.append(best_model.predict(X_test))
+
+    # Evaluate additional models and gather predictions
+    for model in additional_models:
+        evaluate_model(model, X_validation, y_validation, 'Validation')
+        evaluate_model(model, X_test, y_test, 'Test')
+        tuned_models.append((model, model.__class__.__name__))
+        model_predictions.append(model.predict(X_test))
+
+    # Ensembling selected models for regression and creating a DataFrame
+    ensemble_candidates = [model for model, name in tuned_models if name in models_to_ensemble]
+    if len(ensemble_candidates) > 1:
+        ensemble_weights = [1 / len(ensemble_candidates)] * len(ensemble_candidates)  # Equal weights for simplicity
+        ensemble_prediction = ensemble_models(ensemble_candidates, X_test, ensemble_weights)
+        model_predictions.append(ensemble_prediction)
+        # Creating a DataFrame with all model predictions and the ensemble prediction
+        predictions_df = pd.DataFrame(np.column_stack(model_predictions),
+                                      columns=[name for _, name in tuned_models] + ['Ensemble'])
+        print(predictions_df)
+        print(f"Ensemble Model MSE: {mean_squared_error(y_test, ensemble_prediction)}")
+        print(f"Ensemble Model R²: {r2_score(y_test, ensemble_prediction)}")
+    else:
+        print("Not enough models selected for ensembling.")
+
+# Call your function with the appropriate arguments
+tune_evaluate_and_ensemble_models(tuning_functions, additional_models, X_train, y_train, X_validation, y_validation, X_test, y_test, ['XGB Tuned'])
